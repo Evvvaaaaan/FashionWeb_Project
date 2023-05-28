@@ -25,6 +25,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 #---database---#
 
+#must be change to hash!!!!!!!
 userIdData = {"admin":"1234","user1":"2345"}
 
 # userType = admin or user / id = nickname / email = email address / profilePicture = user profile picture 
@@ -36,33 +37,41 @@ userInfo = {"admin":{"userType":"admin", "id":"admin", "email":"email1111@aaaaaa
 
 #---backend server---#
 
-@app.get("/", response_class=HTMLResponse) #main page
-def index(request:Request):
+#main page
+@app.get("/") #must read header and check user
+def index():
+    return "main page"
+
+
+#login page
+@app.get("/login", response_class=HTMLResponse) #login page
+def login(request:Request):
     return templets.TemplateResponse("index.html", {"request":request})
 
-#@app.post("/login.php", response_class=HTMLResponse)
-@app.post("/login.php") #temp code for test
-#def loginIndex(request:Request, id: str=Form(...), password: str=Form(...)):
-def loginIndex(username: str=Form(...), password: str=Form(...)): #temp code for test
-    if password == userIdData[username]:
-        print(f"{username} login sucsess")
-        #return templets.TemplateResponse("", {"request":request})
-        return userInfo[username] #temp code for test
-    else:
-        print(f"{username} login failed")
-        return "login failed" #temp code for test
 
-@app.post("/", response_class=HTMLResponse) #logined main page
-def login_index(request:Request, id:str=Form(...)):
-    return templets.TemplateResponse("", {"request":request, "id":id})
+#login processing page
+@app.post("/loginProcess") 
+def loginProcess(id: str=Form(...), password: str=Form(...)):
+    if id in userIdData: #must be change to hash!!!!!!!!!!!
+        if password == userIdData[id]:
+            print(f"{id} login sucess.")
+            return f"{id} login sucess." #should input jwt to header
+        else:
+            print(f"{id} login failed. (password incorrect)")
+            return f"{id} login failed. (password incorrect)" #just alert in page
+    else:
+        print(f"{id} dose not exist in DB.")
+        return f"{id} dose not exist in DB." #just alert in page
+
+
 
 
 
 
 #404 page
-@app.get("/{item_id}", response_class=HTMLResponse)
-def error(request:Request):
-    return templets.TemplateResponse("", {"request":request})
+@app.get("/{item_id}") 
+def error():
+    return "404 not found"
 #------#
 
 

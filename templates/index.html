@@ -5,14 +5,14 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="{{url_for('static', path = '/css/style.css')}}" />
   </head>
   <body>
     <div class="Login">
       <h1>lik</h1>
-      <form action="./login.php" method="POST">
+      <form action="loginProcess" method="POST">
         <label>id</label>
-        <input type="text" name="username" /><br />
+        <input type="text" name="id" /><br />
         <label>pw</label>
         <input type="password" name="password" /><br />
         <button type="submit">Login</button>
