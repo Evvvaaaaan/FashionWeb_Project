@@ -32,7 +32,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 #--- JWT setting ---#
 # to get a string like this run:
 # openssl rand -hex 32
-SECRET_KEY = "0646f05d474f2960e94e05e3df90193221bf600a250172a4b9d5b062127cd3e0"
+#must change befor live service
+SECRET_KEY = "0646f05d474f2960e94e05e3df90193221bf600a250172a4b9d5b062127cd3e0" #must change befor live service
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -80,9 +81,6 @@ def authenticate_user(userInfo, username: str, password: str):
     return user
 
 
-
-##--- I don't know what it is. ---##
-##--- I don't know what it is. ---##
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     if expires_delta:
@@ -120,8 +118,6 @@ async def get_current_active_user(
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
-##--- ---##
-##--- ---##
 
 
 
@@ -133,6 +129,7 @@ async def get_current_active_user(
 
 #---database---#
 
+# user1 is test account
 # user1:2345
 
 # userType = admin or user / username = nickname / hashed_password / email = email address / profilePicture = user profile picture 
@@ -148,8 +145,7 @@ userInfo = {"admin":{"userType":"admin", "username":"admin", "hashed_password":"
 #---backend server---#
 
 
-#token test
-
+#token
 @app.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
@@ -171,13 +167,13 @@ async def login_for_access_token(
 
 #main page
 @app.get("/") #must read header and check user
-def index():
+async def index():
     return "main page"
 
 
 #login page html show
 @app.get("/login", response_class=HTMLResponse) #login page
-def login(request:Request):
+async def login(request:Request):
     return templets.TemplateResponse("index.html", {"request":request})
 
 """
@@ -196,7 +192,7 @@ def loginProcess(username: str=Form(...), password: str=Form(...)):
         return f"{username} dose not exist in DB." #just alert in page
 """
 
-#token login processing
+#token login processing, return token
 @app.post("/loginProcess", response_model=Token)
 async def login_to_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
@@ -212,7 +208,21 @@ async def login_to_token(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
+    print(f"[{datetime.utcnow()}] {form_data.username} logined")
     return {"access_token": access_token, "token_type": "bearer"} #acces_token must input to header
+
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register(request:Request):
+    return templets.TemplateResponse("register.html", {"request":request})
+
+@app.post("/registerProcess")
+async def registerPrecess(username:str = Form(...), password:str = Form(...), email:str = Form(...)):
+    userInfo[username] = {"userType":"user", "username":username,  "hashed_password":get_password_hash(password),"email":email, "profilePicture":username+".png"}
+    print(f"[{datetime.utcnow()}] {username} register sucess")
+    return f"{username} register sucess"
+
 
 
 
@@ -220,7 +230,7 @@ async def login_to_token(
 
 #404 page
 @app.get("/{item_id}") 
-def error():
+async def error():
     return "404 not found"
 #------#
 
