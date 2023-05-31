@@ -12,7 +12,7 @@ Fashion app
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from typing import Annotated
+from typing import Annotated, Union
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -43,14 +43,14 @@ class Token(BaseModel):
 
 
 class TokenData(BaseModel):
-    username: str | None = None
+    username: Union[str, None] = None
 
 
 class User(BaseModel):
     userType: str
     username: str
     email: str
-    profilePicture: str | None = None
+    profilePicture: Union[str, None] = None
 
 
 class UserInDB(User):
@@ -81,7 +81,7 @@ def authenticate_user(userInfo, username: str, password: str):
     return user
 
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
+def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
