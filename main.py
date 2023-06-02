@@ -21,11 +21,7 @@ from datetime import timedelta, datetime
 from pydantic import BaseModel
 import json
 
-app = FastAPI()
 
-templets = Jinja2Templates(directory="templates")
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 
@@ -59,6 +55,12 @@ class UserInDB(User):
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+app = FastAPI()
+
+templets = Jinja2Templates(directory="templates")
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -113,7 +115,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 
 
 async def get_current_active_user(
-    current_user: Annotated[User, Depends(get_current_user)]
+    current_user: Annotated[User, Depends()]
 ):
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
@@ -145,30 +147,18 @@ userInfo = {"admin":{"userType":"admin", "username":"admin", "hashed_password":"
 #---backend server---#
 
 
-#token
-@app.post("/token", response_model=Token)
-async def login_for_access_token(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
-):
-    user = authenticate_user(userInfo, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
-
-
-
 #main page
 @app.get("/") #must read header and check user
 async def index():
     return "main page"
+
+
+@app.get("/users/me/", response_model=User)
+async def read_users_me(
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    print(current_user)
+    return current_user
 
 
 #login page html show
@@ -176,21 +166,6 @@ async def index():
 async def login(request:Request):
     return templets.TemplateResponse("index.html", {"request":request})
 
-"""
-#string login processing page [not secured] [Do not use.]
-@app.post("/loginProcess") 
-def loginProcess(username: str=Form(...), password: str=Form(...)):
-    if username in userIdData: #must be change to hash!!!!!!!!!!!
-        if password == userIdData[username]:
-            print(f"{username} login sucess.")
-            return f"{username} login sucess." #should input jwt to header
-        else:
-            print(f"{username} login failed. (password incorrect)")
-            return f"{username} login failed. (password incorrect)" #just alert in page
-    else:
-        print(f"{username} dose not exist in DB.")
-        return f"{username} dose not exist in DB." #just alert in page
-"""
 
 #token login processing, return token
 @app.post("/loginProcess", response_model=Token)
@@ -209,7 +184,10 @@ async def login_to_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     print(f"[{datetime.utcnow()}] {form_data.username} logined")
-    return {"access_token": access_token, "token_type": "bearer"} #acces_token must input to header
+    if str(user.userType) == "admin":
+        return {"DB":userInfo,"access_token": access_token, "token_type": "bearer"}
+    else:
+        return {"access_token": access_token, "token_type": "bearer"} #acces_token must input to header
 
 
 
@@ -217,11 +195,17 @@ async def login_to_token(
 async def register(request:Request):
     return templets.TemplateResponse("register.html", {"request":request})
 
+
 @app.post("/registerProcess")
 async def registerPrecess(username:str = Form(...), password:str = Form(...), email:str = Form(...)):
-    userInfo[username] = {"userType":"user", "username":username,  "hashed_password":get_password_hash(password),"email":email, "profilePicture":username+".png"}
-    print(f"[{datetime.utcnow()}] {username} register sucess")
-    return f"{username} register sucess"
+    if username not in userInfo:
+        userInfo[username] = {"userType":"user", "username":username,  "hashed_password":get_password_hash(password),"email":email, "profilePicture":username+".png"}
+        print(f"[{datetime.utcnow()}] {username} register sucess")
+        return f"{username} register sucess"
+    else:
+        print(f"[{datetime.utcnow()}] {username} register failed - username already exist.")
+        return f"{username} register failed, username is already exist."
+    
 
 
 
