@@ -9,7 +9,7 @@ Fashion app
 # uvicorn main:app --reload
 # run web page  ^^^^
 
-from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, Response
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from typing import Annotated, Union
@@ -170,7 +170,8 @@ async def login(request:Request):
 #token login processing, return token
 @app.post("/loginProcess", response_model=Token)
 async def login_to_token(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    response : Response
 ):
     user = authenticate_user(userInfo, form_data.username, form_data.password)
     if not user:
@@ -184,6 +185,7 @@ async def login_to_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     print(f"[{datetime.utcnow()}] {form_data.username} logined")
+    response.set_cookie(key="access_token", value=access_token)
     if str(user.userType) == "admin":
         return {"DB":userInfo,"access_token": access_token, "token_type": "bearer"}
     else:
