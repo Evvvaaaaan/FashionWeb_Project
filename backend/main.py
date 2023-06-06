@@ -47,6 +47,7 @@ class User(BaseModel):
     username: str
     email: str
     profilePicture: Union[str, None] = None
+    disabled: bool
 
 
 class UserInDB(User):
@@ -57,6 +58,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 app = FastAPI()
+
+
 
 templets = Jinja2Templates(directory="templates")
 
@@ -94,7 +97,7 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
     return encoded_jwt
 
 
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
+async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -115,7 +118,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 
 
 async def get_current_active_user(
-    current_user: Annotated[User, Depends()]
+    current_user: User = Depends(get_current_user)
 ):
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
@@ -135,8 +138,8 @@ async def get_current_active_user(
 # user1:2345
 
 # userType = admin or user / username = nickname / hashed_password / email = email address / profilePicture = user profile picture 
-userInfo = {"admin":{"userType":"admin", "username":"admin", "hashed_password":"$2b$12$t5758WWPnKsrn.7tprpGnub5qdBhoCvcyzcHOYGQRo6JjLWcnTwLy","email":"email1111@aaaaaa.com", "profilePicture":"admin.png"},
-            "user1":{"userType":"user", "username":"user1",  "hashed_password":"$2b$12$zHb1jmxdbpt5P3OTH1fMdOYhwxVav1tluFeNyCDeCURWV/QA.hAU2","email":"email2222@bbbbbb.com", "profilePicture":"user1.png"}
+userInfo = {"admin":{"userType":"admin", "username":"admin", "hashed_password":"$2b$12$t5758WWPnKsrn.7tprpGnub5qdBhoCvcyzcHOYGQRo6JjLWcnTwLy","email":"email1111@aaaaaa.com", "profilePicture":"admin.png", "disabled":False},
+            "user1":{"userType":"user", "username":"user1",  "hashed_password":"$2b$12$zHb1jmxdbpt5P3OTH1fMdOYhwxVav1tluFeNyCDeCURWV/QA.hAU2","email":"email2222@bbbbbb.com", "profilePicture":"user1.png", "disabled":False}
         }
 #------#
 
@@ -145,6 +148,24 @@ userInfo = {"admin":{"userType":"admin", "username":"admin", "hashed_password":"
 
 
 #---backend server---#
+
+#token
+@app.post("/token", response_model=Token)
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
+    user = authenticate_user(userInfo, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 #main page
@@ -155,9 +176,8 @@ async def index():
 
 @app.get("/users/me/", response_model=User)
 async def read_users_me(
-    current_user: Annotated[User, Depends(get_current_active_user)]
+    current_user: User = Depends(get_current_active_user)
 ):
-    print(current_user)
     return current_user
 
 
@@ -170,8 +190,7 @@ async def login(request:Request):
 #token login processing, return token
 @app.post("/loginProcess", response_model=Token)
 async def login_to_token(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    response : Response
+    form_data: OAuth2PasswordRequestForm = Depends()
 ):
     user = authenticate_user(userInfo, form_data.username, form_data.password)
     if not user:
@@ -185,12 +204,7 @@ async def login_to_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     print(f"[{datetime.utcnow()}] {form_data.username} logined")
-    response.set_cookie(key="access_token", value=access_token)
-    if str(user.userType) == "admin":
-        return {"DB":userInfo,"access_token": access_token, "token_type": "bearer"}
-    else:
-        return {"access_token": access_token, "token_type": "bearer"} #acces_token must input to header
-
+    return {"access_token": access_token, "token_type": "bearer"} #acces_token must input to header
 
 
 @app.get("/register", response_class=HTMLResponse)
