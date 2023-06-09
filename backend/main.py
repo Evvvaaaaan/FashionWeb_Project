@@ -20,7 +20,10 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import timedelta, datetime
 from pydantic import BaseModel
 import json
-
+import os
+#database
+from database import engineconn
+from models import DBtable
 
 
 
@@ -28,8 +31,13 @@ import json
 #--- JWT setting ---#
 # to get a string like this run:
 # openssl rand -hex 32
-#must change befor live service
-SECRET_KEY = "0646f05d474f2960e94e05e3df90193221bf600a250172a4b9d5b062127cd3e0" #must change befor live service
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SECRET_FILE = os.path.join(BASE_DIR, "secrets.json")
+secrets = json.loads(open(SECRET_FILE).read())
+
+SECRET_KEY = secrets["server"]["SECRET_KEY"]
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -73,15 +81,34 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 def get_user(db, username: str):
-    if username in db:
-        user_dict = db[username]
+    try:
+        information = session.query(db).get(username)
+    except Exception as e:
+        print(e)
+        print(f"[{datetime.utcnow()}] DATABASE DOWN")
+        return 
+    if information != None: # Is it ok?
+        user_dict = {
+            "userType":information.userType,
+            "username":information.username,
+            "hashed_password":information.hashed_password,
+            "email":information.email,
+            "profilePicture":information.profilePicture,
+            "text":information.text,
+            "disabled" : information.disabled
+            }
         return UserInDB(**user_dict)
+        #return UserInDB(user_dict)
+    else:
+        return
     
-def authenticate_user(userInfo, username: str, password: str):
-    user = get_user(userInfo, username)
+def authenticate_user(db, username: str, password: str):
+    user = get_user(db, username)
     if not user:
+        print(f"[{datetime.utcnow()}] \"{username}\" is not exist in database.")
         return False
     if not verify_password(password, user.hashed_password):
+        print(f"[{datetime.utcnow()}] \"{username}\" password not correct.")
         return False
     return user
 
@@ -111,7 +138,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
-    user = get_user(userInfo, username=token_data.username)#changed
+    user = get_user(DBtable, username=token_data.username)#changed
     if user is None:
         raise credentials_exception
     return user
@@ -137,10 +164,35 @@ async def get_current_active_user(
 # user1 is test account
 # user1:2345
 
+"""
+mysql
+FashionWebProjectDB
+table : userInfo
+
+port = 9000
+
+
+"""
+
+
+engine = engineconn()
+session = engine.sessionmaker()
+
+class Item(BaseModel):
+    username: str
+    hashed_password: str
+    userType: str
+    email: str
+    profilePicture: Union[str, None] = None
+    text: Union[str, None] = None
+    disabled: bool
+
+
+
 # userType = admin or user / username = nickname / hashed_password / email = email address / profilePicture = user profile picture 
-userInfo = {"admin":{"userType":"admin", "username":"admin", "hashed_password":"$2b$12$t5758WWPnKsrn.7tprpGnub5qdBhoCvcyzcHOYGQRo6JjLWcnTwLy","email":"email1111@aaaaaa.com", "profilePicture":"admin.png", "disabled":False},
-            "user1":{"userType":"user", "username":"user1",  "hashed_password":"$2b$12$zHb1jmxdbpt5P3OTH1fMdOYhwxVav1tluFeNyCDeCURWV/QA.hAU2","email":"email2222@bbbbbb.com", "profilePicture":"user1.png", "disabled":False}
-        }
+# userInfo = {"admin":{"userType":"admin", "username":"admin", "hashed_password":"$2b$12$5xX.C3IVfDqwRZl/fbnpeufhxJrIL2QHxafolNtYe/q5LV/24twRG","email":"email1111@aaaaaa.com", "profilePicture":"admin.png", "disabled":False},
+#             "user1":{"userType":"user", "username":"user1",  "hashed_password":"$2b$12$rokVzyGhihS1m2EUI2gtdu23OleALE8FFZF3O8bnP.cTE4J6BY4qy","email":"email2222@bbbbbb.com", "profilePicture":"user1.png", "disabled":False}
+#         }
 #------#
 
 
@@ -154,7 +206,7 @@ userInfo = {"admin":{"userType":"admin", "username":"admin", "hashed_password":"
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends()
 ):
-    user = authenticate_user(userInfo, form_data.username, form_data.password)
+    user = authenticate_user(DBtable, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -192,7 +244,7 @@ async def login(request:Request):
 async def login_to_token(
     form_data: OAuth2PasswordRequestForm = Depends()
 ):
-    user = authenticate_user(userInfo, form_data.username, form_data.password)
+    user = authenticate_user(DBtable, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -205,23 +257,6 @@ async def login_to_token(
     )
     print(f"[{datetime.utcnow()}] {form_data.username} logined")
     return {"access_token": access_token, "token_type": "bearer"} #acces_token must input to header
-
-
-@app.get("/register", response_class=HTMLResponse)
-async def register(request:Request):
-    return templets.TemplateResponse("register.html", {"request":request})
-
-
-@app.post("/registerProcess")
-async def registerPrecess(username:str = Form(...), password:str = Form(...), email:str = Form(...)):
-    if username not in userInfo:
-        userInfo[username] = {"userType":"user", "username":username,  "hashed_password":get_password_hash(password),"email":email, "profilePicture":username+".png"}
-        print(f"[{datetime.utcnow()}] {username} register sucess")
-        return f"{username} register sucess"
-    else:
-        print(f"[{datetime.utcnow()}] {username} register failed - username already exist.")
-        return f"{username} register failed, username is already exist."
-    
 
 
 
