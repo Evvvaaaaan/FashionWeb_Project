@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
 from datetime import timedelta, datetime
 from pydantic import BaseModel
 import json
@@ -39,15 +40,13 @@ secrets = json.loads(open(SECRET_FILE).read())
 SECRET_KEY = secrets["server"]["SECRET_KEY"]
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 10
+REFRESH_TOKEN_EXPIRE_DAYS = 1
 
 class Token(BaseModel):
     access_token: str
     token_type: str
-
-
-class TokenData(BaseModel):
-    username: Union[str, None] = None
+    refresh_token: str
 
 
 class User(BaseModel):
@@ -55,6 +54,7 @@ class User(BaseModel):
     username: str
     email: str
     profilePicture: Union[str, None] = None
+    text: Union[str, None] = None
     disabled: bool
 
 
@@ -68,10 +68,22 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 app = FastAPI()
 
 
+origins = [
+    "http://localhost:3000",
+    "localhost:3000"
+]
 
-templets = Jinja2Templates(directory="templates")
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*","Authorization"],
+)
+
+
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -98,7 +110,6 @@ def get_user(db, username: str):
             "disabled" : information.disabled
             }
         return UserInDB(**user_dict)
-        #return UserInDB(user_dict)
     else:
         return
     
@@ -124,6 +135,41 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
     return encoded_jwt
 
 
+def create_refresh_token(data: dict, expires_delta: Union[timedelta, None] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(days=1)
+    to_encode.update({"refresh":"token", "exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def authenticate_refresh_token(token: str ):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        #headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("refresh") != "token":
+            raise credentials_exception
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        exp: str = payload.get("exp")
+        if exp is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = get_user(DBtable, username=username)
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -135,10 +181,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
-        token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
-    user = get_user(DBtable, username=token_data.username)#changed
+    user = get_user(DBtable, username=username)
     if user is None:
         raise credentials_exception
     return user
@@ -217,7 +262,33 @@ async def login_for_access_token(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    refresh_token = create_refresh_token(
+        data={"sub": user.username}, expires_delta=refresh_token_expires
+    )
+    print(f"[{datetime.utcnow()}] \"{form_data.username}\" get access token")
+    return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
+
+@app.post("/refreshToken", response_model=Token)
+async def response_refresh_token(refresh_token: str=Form(...)):
+    user = authenticate_refresh_token(refresh_token)
+    if not user:
+        raise HTTPException(#raise login failed alert
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    refresh_token = create_refresh_token(
+        data={"sub": user.username}, expires_delta=refresh_token_expires
+    )
+    print(f"[{datetime.utcnow()}] \"{user.username}\" get access token")
+
+    return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
 
 
 #main page
@@ -232,31 +303,6 @@ async def read_users_me(
 ):
     return current_user
 
-
-#login page html show
-@app.get("/login", response_class=HTMLResponse) #login page
-async def login(request:Request):
-    return templets.TemplateResponse("index.html", {"request":request})
-
-
-#token login processing, return token
-@app.post("/loginProcess", response_model=Token)
-async def login_to_token(
-    form_data: OAuth2PasswordRequestForm = Depends()
-):
-    user = authenticate_user(DBtable, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    print(f"[{datetime.utcnow()}] {form_data.username} logined")
-    return {"access_token": access_token, "token_type": "bearer"} #acces_token must input to header
 
 
 
